@@ -34,6 +34,9 @@ class DTP_PostHog_Tracker {
         // Show admin notice if settings are not configured
         add_action('admin_notices', [$this, 'admin_notice_missing_settings']);
 
+        // Inject PostHog JS snippet into <head>
+        add_action('wp_head', [$this, 'inject_posthog_snippet']);
+
         // Enqueue client-side property collector
         add_action('wp_enqueue_scripts', [$this, 'enqueue_client_script']);
 
@@ -50,6 +53,27 @@ class DTP_PostHog_Tracker {
     }
 
     /**
+     * Inject PostHog JS snippet into <head> on frontend
+     */
+    public function inject_posthog_snippet() {
+        if (empty($this->api_key) || empty($this->posthog_url)) {
+            return;
+        }
+
+        // Derive base host from the stored capture URL (e.g. https://app.posthog.com/capture/ → https://app.posthog.com)
+        $parsed   = parse_url($this->posthog_url);
+        $api_host = $parsed['scheme'] . '://' . $parsed['host'];
+        ?>
+        <script>
+            if (!window.posthog || !window.posthog.__loaded) {
+                !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.async=!0,p.src=s.api_host+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+" (stub)"},o="capture identify alias people.set people.set_once set_config register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled onFeatureFlags getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures getActiveMatchingSurveys getSurveys onSessionId".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||(window.posthog=[]));
+                posthog.init('<?php echo esc_js($this->api_key); ?>', {api_host: '<?php echo esc_js($api_host); ?>'});
+            }
+        </script>
+        <?php
+    }
+
+    /**
      * Enqueue client-side property collector on frontend
      */
     public function enqueue_client_script() {
@@ -57,47 +81,27 @@ class DTP_PostHog_Tracker {
             'dtp-posthog-client',
             plugin_dir_url(__FILE__) . 'js/dtp-posthog-client.js',
             [],
-            '1.0.0',
+            filemtime(plugin_dir_path(__FILE__) . 'js/dtp-posthog-client.js'),
             true
         );
     }
 
     /**
-     * Read client-side properties from cookie
+     * Read correlation_id from cookie set by client-side JS on submit click
      */
     private function get_client_properties() {
-        if (empty($_COOKIE['dtp_posthog_client_props'])) {
+        if (empty($_COOKIE['dtp_correlation_id'])) {
             return [];
         }
 
-        $raw = sanitize_text_field(wp_unslash($_COOKIE['dtp_posthog_client_props']));
-        $decoded = json_decode($raw, true);
+        $correlation_id = sanitize_text_field(wp_unslash($_COOKIE['dtp_correlation_id']));
 
-        if (!is_array($decoded)) {
+        // Validate it looks like a UUID before using it
+        if (!preg_match('/^[0-9a-f\-]{36}$/i', $correlation_id)) {
             return [];
         }
 
-        // Whitelist allowed property keys
-        $allowed_keys = [
-            '$current_url', '$pathname', '$host',
-            '$browser', '$browser_version',
-            '$device_type',
-            '$os', '$os_version',
-            '$screen_height', '$screen_width',
-            '$viewport_height', '$viewport_width',
-            '$referrer', '$referring_domain',
-            '$lib',
-            'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
-        ];
-
-        $sanitized = [];
-        foreach ($decoded as $key => $value) {
-            if (in_array($key, $allowed_keys, true)) {
-                $sanitized[$key] = is_numeric($value) ? (int) $value : sanitize_text_field($value);
-            }
-        }
-
-        return $sanitized;
+        return ['correlation_id' => $correlation_id];
     }
 
     /**
