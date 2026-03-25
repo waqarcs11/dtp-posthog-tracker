@@ -20,7 +20,7 @@ class DTP_PostHog_Tracker {
         // Get settings from options (no defaults - customer must configure)
         $this->api_key = get_option('dtp_posthog_api_key', '');
         $this->posthog_url = get_option('dtp_posthog_url', '');
-        $this->event_name = get_option('dtp_posthog_event_name', 'Form Submitted');
+        $this->event_name = get_option('dtp_posthog_event_name', 'Fundacann Form Submitted');
 
         // Add admin menu
         add_action('admin_menu', [$this, 'add_settings_page']);
@@ -39,6 +39,9 @@ class DTP_PostHog_Tracker {
 
         // Enqueue client-side property collector
         add_action('wp_enqueue_scripts', [$this, 'enqueue_client_script']);
+
+        // Enqueue Breakdance form tracker
+        add_action('wp_enqueue_scripts', [$this, 'enqueue_breakdance_script']);
 
         // Only add the hook if Ninja Forms is active
         add_action('plugins_loaded', [$this, 'init']);
@@ -105,6 +108,31 @@ class DTP_PostHog_Tracker {
     }
 
     /**
+     * Enqueue Breakdance form tracker script on frontend
+     */
+    public function enqueue_breakdance_script() {
+        wp_enqueue_script(
+            'dtp-breakdance-forms',
+            plugin_dir_url(__FILE__) . 'js/dtp-breakdance-forms.js',
+            [],
+            filemtime(plugin_dir_path(__FILE__) . 'js/dtp-breakdance-forms.js'),
+            true
+        );
+
+        $parsed   = parse_url($this->posthog_url);
+        $api_host = (!empty($parsed['scheme']) && !empty($parsed['host']))
+            ? $parsed['scheme'] . '://' . $parsed['host']
+            : '';
+
+        wp_localize_script('dtp-breakdance-forms', 'dtpBreakdanceConfig', [
+            'eventName' => !empty($this->event_name) ? $this->event_name : 'Fundacann Form Submitted',
+            'debug'     => (defined('WP_DEBUG') && WP_DEBUG) ? true : false,
+            'apiKey'    => $this->api_key,
+            'apiHost'   => $api_host,
+        ]);
+    }
+
+    /**
      * Add settings page to WordPress admin menu
      */
     public function add_settings_page() {
@@ -136,7 +164,7 @@ class DTP_PostHog_Tracker {
         register_setting('dtp_posthog_settings_group', 'dtp_posthog_event_name', [
             'type' => 'string',
             'sanitize_callback' => 'sanitize_text_field',
-            'default' => 'Form Submitted'
+            'default' => 'Fundacann Form Submitted'
         ]);
 
         add_settings_section(
@@ -200,9 +228,9 @@ class DTP_PostHog_Tracker {
      * Event Name field callback
      */
     public function event_name_field_callback() {
-        $event_name = get_option('dtp_posthog_event_name', 'Form Submitted');
-        echo '<input type="text" name="dtp_posthog_event_name" value="' . esc_attr($event_name) . '" class="regular-text" placeholder="Form Submitted" />';
-        echo '<p class="description">Enter the event name to send to PostHog (default: "Form Submitted")</p>';
+        $event_name = get_option('dtp_posthog_event_name', 'Fundacann Form Submitted');
+        echo '<input type="text" name="dtp_posthog_event_name" value="' . esc_attr($event_name) . '" class="regular-text" placeholder="Fundacann Form Submitted" />';
+        echo '<p class="description">Enter the event name to send to PostHog (default: "Fundacann Form Submitted")</p>';
     }
 
     /**
@@ -316,7 +344,7 @@ class DTP_PostHog_Tracker {
             $payload = [
                 'api_key'     => $this->api_key,
                 'distinct_id' => $distinct_id,
-                'event'       => !empty($this->event_name) ? $this->event_name : 'Form Submitted',
+                'event'       => !empty($this->event_name) ? $this->event_name : 'Fundacann Form Submitted',
                 'properties'  => $properties,
             ];
 

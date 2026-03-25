@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:breakdance.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:forum.bricksbuilder.io)",
+      "WebFetch(domain:babarilyas.com)",
+      "WebFetch(domain:breakdance4fun.supadezign.com)",
+      "WebFetch(domain:conversionbridgewp.com)",
+      "WebFetch(domain:wsform.com)",
+      "WebFetch(domain:plugins.svn.wordpress.org)"
+    ]
+  }
+}

@@ -30,17 +30,17 @@
 
     function onSubmitClick() {
         var correlationId = getCorrelationId();
-
+        console.log('fundcanna_form_submit_capture');
         if (window.posthog && typeof window.posthog.capture === 'function') {
-            window.posthog.capture('form_submit_attempt', {
+            window.posthog.capture('fundcanna_form_submit_attempt', {
                 correlation_id: correlationId
-            });
+            }, { transport: 'sendBeacon' });
         }
     }
     console.log('start submitting');
     document.addEventListener('click', function (e) {
-        var t = e.target;
-        if (t.tagName === 'INPUT' && (t.type === 'button' || t.type === 'submit') && t.classList.contains('ninja-forms-field')) {
+        var submitEl = e.target.closest('button[type="submit"], button:not([type]), input[type="submit"], input[type="button"]');
+        if (submitEl && submitEl.closest('form')) {
             console.log('checked if submit');
             onSubmitClick();
         }
