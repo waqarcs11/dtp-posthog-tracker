@@ -69,12 +69,31 @@
         return match ? decodeURIComponent(match[1]) : null;
     }
 
+    // Deduplication: track recently fired event signatures to prevent double-capture
+    // when both XHR and fetch interceptors detect the same form submission.
+    var _recentlyCaptured = {};
+    var DEDUP_WINDOW_MS = 3000;
+
+    function isDuplicate(formFields) {
+        var key = (formFields['action'] || '') + '|' + (formFields['post_id'] || '') + '|' + (formFields['_wpnonce'] || formFields['nonce'] || '');
+        var now = Date.now();
+        if (_recentlyCaptured[key] && (now - _recentlyCaptured[key]) < DEDUP_WINDOW_MS) {
+            return true;
+        }
+        _recentlyCaptured[key] = now;
+        return false;
+    }
+
     /**
      * Fire the PostHog capture call with cleaned form properties.
      * Uses navigator.sendBeacon directly so events survive page redirects
      * regardless of whether posthog.js has fully initialised.
      */
     function captureEvent(formFields, responseData) {
+        if (isDuplicate(formFields)) {
+            console.log('[DTP PostHog Breakdance] Duplicate event suppressed within dedup window.');
+            return;
+        }
         // Strip internal WordPress/AJAX params — not useful as PostHog properties.
         var SKIP = ['action', '_wpnonce', 'nonce', '_wp_http_referer', 'post_id'];
         var properties = {};
