@@ -15,7 +15,6 @@
      * Parse a URLEncoded string or FormData body into a plain object.
      */
     function parseBody(body) {
-        console.log('Start parse Body==' + EVENT_NAME)
         var fields = {};
 
         if (!body) return fields;
@@ -23,17 +22,46 @@
         try {
             if (body instanceof FormData) {
                 body.forEach(function (value, key) {
-                    fields[key] = value;
+                    // Multi-value keys (e.g. checkboxes, multi-select): collect as array.
+                    if (Object.prototype.hasOwnProperty.call(fields, key)) {
+                        if (!Array.isArray(fields[key])) {
+                            fields[key] = [fields[key]];
+                        }
+                        fields[key].push(value);
+                    } else {
+                        fields[key] = value;
+                    }
                 });
             } else if (typeof body === 'string') {
-                new URLSearchParams(body).forEach(function (value, key) {
+                // Try JSON first (Breakdance may send application/json).
+                try {
+                    var parsed = JSON.parse(body);
+                    if (parsed && typeof parsed === 'object') {
+                        Object.keys(parsed).forEach(function (k) { fields[k] = parsed[k]; });
+                    }
+                } catch (jsonErr) {
+                    // Fall back to URL-encoded.
+                    new URLSearchParams(body).forEach(function (value, key) {
+                        if (Object.prototype.hasOwnProperty.call(fields, key)) {
+                            if (!Array.isArray(fields[key])) {
+                                fields[key] = [fields[key]];
+                            }
+                            fields[key].push(value);
+                        } else {
+                            fields[key] = value;
+                        }
+                    });
+                }
+            } else if (body instanceof URLSearchParams) {
+                body.forEach(function (value, key) {
                     fields[key] = value;
                 });
             }
         } catch (e) {
-            log('Could not parse request body:', e);
+            console.log('[DTP PostHog] Could not parse request body:', e);
         }
-        console.log('Retune fields ==' + fields);
+
+        console.log('[DTP PostHog] Parsed form fields:', JSON.stringify(fields));
         return fields;
     }
 
@@ -98,13 +126,38 @@
         var SKIP = ['action', '_wpnonce', 'nonce', '_wp_http_referer', 'post_id'];
         var properties = {};
 
+        // PostHog treats these as built-in system properties — rename them so they
+        // land in custom event properties and are accessible to data pipelines.
+        var POSTHOG_RESERVED = {
+            'revenue': 'form_revenue',
+            'amount':  'form_amount',
+            'name':    'form_name'
+        };
+
         Object.keys(formFields).forEach(function (key) {
-            if (SKIP.indexOf(key) === -1 && formFields[key] !== '') {
-                var match = key.match(/^fields\[(.+)\]$/);
-                var cleanKey = match ? match[1] : key;
-                properties[cleanKey] = formFields[key];
+            if (SKIP.indexOf(key) === -1 && formFields[key] != null) {
+                // Strip the fields[...] wrapper Breakdance uses.
+                // Also handle nested selects sent as fields[id][value] → id_value.
+                var match = key.match(/^fields\[([^\]]+)\](?:\[([^\]]+)\])?$/);
+                var cleanKey = match
+                    ? (match[2] ? match[1] + '_' + match[2] : match[1])
+                    : key;
+
+                // Remap reserved PostHog property names.
+                if (POSTHOG_RESERVED[cleanKey]) {
+                    cleanKey = POSTHOG_RESERVED[cleanKey];
+                }
+
+                var val = formFields[key];
+                // If Breakdance sends a select as a JSON object {label,value}, unwrap the value.
+                if (val && typeof val === 'object' && !Array.isArray(val) && val.value !== undefined) {
+                    val = val.value;
+                }
+                properties[cleanKey] = val;
             }
         });
+
+        console.log('[DTP PostHog] Properties to send:', JSON.stringify(properties));
 
         // Pull any form metadata the Breakdance AJAX response includes.
         if (responseData && typeof responseData === 'object') {
