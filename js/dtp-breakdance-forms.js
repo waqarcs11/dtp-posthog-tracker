@@ -171,6 +171,12 @@
         properties['SiteId']       = window.location.hostname;
         properties['PageUrl']      = window.location.href;
 
+        // Capture UTM parameters from the current page URL.
+        var urlParams = new URLSearchParams(window.location.search);
+        ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'].forEach(function (param) {
+            properties['$' + param] = urlParams.get(param) || null;
+        });
+
         var correlationId = getCorrelationId();
         if (correlationId) {
             properties['correlation_id'] = correlationId;
