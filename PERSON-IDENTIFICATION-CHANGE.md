@@ -62,3 +62,66 @@ Inside `send_form_to_posthog()`, after the field properties are built:
 After this change, as soon as a lead submits a form with their email, PostHog creates/updates a **Person profile** with their email (and name/phone if present), merges their prior anonymous session activity into that profile, and all subsequent events (including the "Form Submitted" event itself) are recorded against the identified person rather than an anonymous ID.
 
 See [README.md § 14 — PostHog Person Identification](README.md#14-posthog-person-identification) for the full technical reference.
+
+---
+
+## How to Test This
+
+### Before you start
+
+- Use a **real or unique test email** each time (e.g. `yourname+test1@gmail.com`). PostHog treats each `distinct_id` as a separate identity, so reusing the same email across tests is fine, but using a fresh one makes it easy to find your test in PostHog.
+- Open the browser in a state where the visitor is **not yet identified** — easiest way is to open the site in a **fresh Incognito/Private window** (so there's no existing `ph_<api_key>_posthog` cookie from a previous test).
+- Open **DevTools → Console** and **DevTools → Network** tabs before loading the page.
+
+### 1. Test the Breakdance form (client-side)
+
+1. In Incognito mode, go to the page with the Breakdance lead form.
+2. In the **Console**, confirm you see the tracker init logs (e.g. `Breakdance form tracker initialized...`).
+3. Fill in the form, including the **email field** (and name/phone if the form has them).
+4. Submit the form.
+5. In the **Console**, look for:
+   ```
+   Identifying person via PostHog: yourname+test1@gmail.com
+   ```
+   - If you instead see `Person already identified as ... - skipping identify.`, it means this browser/cookie was already linked to an identity — clear cookies or use a new Incognito window and try again.
+6. In the **Network** tab, filter by `posthog` or `/e/` (or `/capture/`, depending on your PostHog host). You should see **two** requests fire:
+   - One with `"event": "$identify"` and a `$set` object containing `email` (and name/phone if present).
+   - One with the configured form event name (e.g. `Fundacann Form Submitted`).
+
+### 2. Test the Ninja Forms form (server-side)
+
+1. In the same Incognito session (so the `ph_<api_key>_posthog` cookie already exists from step 1, or load any page first so posthog.js sets the cookie), go to the page with the Ninja Forms lead form.
+2. Fill in the form, including the **email field**, and submit.
+3. Check the **PHP error log** (location depends on your WordPress/server setup, often `wp-content/debug.log` if `WP_DEBUG_LOG` is enabled) for:
+   ```
+   ✅ DTP PostHog Tracker Response: ...
+   ```
+   This confirms the server-side request(s) to PostHog succeeded. There should be a successful response logged for both the `$identify` event and the main form event.
+
+### 3. Verify in the PostHog dashboard
+
+1. Log in to PostHog and go to **People → Persons**.
+2. Search for the test email you used (e.g. `yourname+test1@gmail.com`).
+3. Open the matching person profile and confirm:
+   - **Properties** tab shows `email` (and `first_name`/`last_name`/`phone` if your form had those fields).
+   - **Activity / Events** tab shows the form submission event (e.g. `Fundacann Form Submitted`) and the `$identify` event.
+   - If you visited other pages anonymously before submitting, those earlier pageview events should now also appear under this same person — confirming the anonymous history was merged.
+4. Optionally, go to **Activity → Events** and search by event name (`$identify` or your form event name) and confirm the `distinct_id` shown matches the email.
+
+### 4. Confirm "skip if already identified" works
+
+1. Without clearing cookies, submit the **same form again** in the same browser session.
+2. In the Console (Breakdance) you should now see:
+   ```
+   Person already identified as yourname+test1@gmail.com - skipping identify.
+   ```
+3. In the Network tab, only **one** PostHog request should fire (the form event) — no second `$identify` request.
+
+### Troubleshooting
+
+| Symptom | Likely cause |
+|---|---|
+| No `Identifying person via PostHog` log appears | None of the submitted field values matched the email regex — check the form actually has an email field and it was filled in. |
+| `$identify` event missing in PostHog but visible in Network tab | Check the PostHog project API key/host configured in **Settings → PostHog Tracker** is correct. |
+| Ninja Forms `$identify` never sent | The `ph_<api_key>_posthog` cookie may not exist yet (visitor's first-ever request, before posthog.js had a chance to set it) — load any page once before submitting, or check cookies aren't blocked by browser privacy settings/ad blockers. |
+| Person profile not merging anonymous history | Make sure you tested in the **same browser/cookie session** that generated the anonymous events — `$anon_distinct_id` only merges the specific anonymous ID stored in that browser's cookie. |
