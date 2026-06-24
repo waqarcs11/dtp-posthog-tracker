@@ -25,7 +25,8 @@
 11. [Known PostHog Reserved Property Conflicts](#11-known-posthog-reserved-property-conflicts)
 12. [Admin Settings Page](#12-admin-settings-page)
 13. [Debugging](#13-debugging)
-14. [Limitations & Notes](#14-limitations--notes)
+14. [PostHog Person Identification](#14-posthog-person-identification)
+15. [Limitations & Notes](#15-limitations--notes)
 
 ---
 
@@ -472,7 +473,51 @@ Set `WP_DEBUG = true` in `wp-config.php`. This enables additional verbose loggin
 
 ---
 
-## 14. Limitations & Notes
+## 14. PostHog Person Identification
+
+By default, PostHog tracks every visitor under an **anonymous `distinct_id`** (a random UUID, also stored as `$device_id`). All pageviews, clicks, and the `fundcanna_form_submit_attempt` event are recorded against that anonymous ID until the visitor is **identified** as a known person (e.g., via their email address).
+
+This plugin automatically identifies the visitor as soon as a form submission contains an email address — for **both** Breakdance and Ninja Forms.
+
+### 14.1 Breakdance (client-side — `dtp-breakdance-forms.js`)
+
+Inside `captureEvent()`, before the main "Form Submitted" event is sent:
+
+1. **`findEmail(properties)`** — scans every submitted field value and returns the first one matching an email regex (`/^[^\s@]+@[^\s@]+\.[^\s@]+$/`). No specific field name/key is required.
+2. **Already-identified check** — compares `posthog.get_distinct_id()` with `posthog.get_property('$device_id')`. If they differ, the visitor is already identified and the step is skipped.
+3. **`buildIdentifyProperties(properties, email)`** — builds the `$set` payload: `email` plus any field whose key matches `/name|phone|mobile|tel/i` (e.g. `first_name`, `last_name`, `phone`).
+4. **`window.posthog.identify(email, setProps)`** — links the anonymous profile to the email-based identity. This updates the locally persisted `distinct_id` immediately, so the "Form Submitted" event captured right after (which reads `posthog.get_distinct_id()`) is recorded against the same identified person.
+
+### 14.2 Ninja Forms (server-side — `dtp-posthog-tracker.php`)
+
+Inside `send_form_to_posthog()`, after `$field_properties` is built:
+
+1. **`find_email_in_properties()`** — same approach as the JS side, using `filter_var($value, FILTER_VALIDATE_EMAIL)` over all field values.
+2. **`get_posthog_anon_distinct_id()`** — reads the anonymous `distinct_id` from the `ph_<api_key>_posthog` cookie that posthog.js persists in the browser.
+3. **Already-identified check** — if the anonymous `distinct_id` already equals the email, identification is skipped.
+4. **`send_identify_event()`** — sends a `$identify` event to PostHog with:
+   ```json
+   {
+     "event": "$identify",
+     "distinct_id": "user@example.com",
+     "properties": {
+       "$set": { "email": "user@example.com", "first_name": "...", "phone": "..." },
+       "$anon_distinct_id": "<previous anonymous distinct_id from cookie>"
+     }
+   }
+   ```
+   `$anon_distinct_id` tells PostHog to merge the anonymous person's history into the new identified profile.
+5. The main Ninja Forms event's `distinct_id` is then set to the email address, so it's recorded against the same identified person.
+
+### 14.3 Notes
+
+- Identification only happens **once per visitor** — once `distinct_id` no longer matches the anonymous `$device_id` (Breakdance) or the cookie's `distinct_id` already equals the email (Ninja Forms), the `$identify` call is skipped.
+- If no field value matches the email regex, identification is skipped entirely and the event continues to use the anonymous `distinct_id`.
+- This relies on posthog.js's default cookie persistence (`ph_<api_key>_posthog`) being enabled so the server-side handler can read the anonymous `distinct_id`.
+
+---
+
+## 15. Limitations & Notes
 
 - **Breakdance only (client-side):** The client-side tracker (`dtp-breakdance-forms.js`) is built specifically for Breakdance forms. It relies on Breakdance posting to `admin-ajax.php` with an action name containing both "breakdance" and "form". If Breakdance ever changes this, the `isBreakdanceForm()` check will need updating.
 

@@ -108,6 +108,67 @@ class DTP_PostHog_Tracker {
     }
 
     /**
+     * Find the first field value that looks like an email address.
+     */
+    private function find_email_in_properties($properties) {
+        foreach ($properties as $value) {
+            if (is_string($value) && filter_var($value, FILTER_VALIDATE_EMAIL)) {
+                return $value;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Read the anonymous PostHog distinct_id from the posthog.js cookie.
+     */
+    private function get_posthog_anon_distinct_id() {
+        if (empty($this->api_key)) {
+            return null;
+        }
+
+        $cookie_name = 'ph_' . $this->api_key . '_posthog';
+        if (empty($_COOKIE[$cookie_name])) {
+            return null;
+        }
+
+        $data = json_decode(wp_unslash($_COOKIE[$cookie_name]), true);
+        if (!is_array($data) || empty($data['distinct_id'])) {
+            return null;
+        }
+
+        return sanitize_text_field($data['distinct_id']);
+    }
+
+    /**
+     * Link the visitor's PostHog profile to a known person. If $anon_distinct_id
+     * is omitted, only the person's $set properties are updated (used when the
+     * browser was previously identified as a *different* email — switching the
+     * active identity without merging two already-identified people together).
+     */
+    private function send_identify_event($email, $field_properties, $anon_distinct_id = null) {
+        $set_properties = ['email' => $email];
+
+        foreach ($field_properties as $key => $value) {
+            if (preg_match('/name|phone|mobile|tel/i', $key)) {
+                $set_properties[$key] = $value;
+            }
+        }
+
+        $properties = ['$set' => $set_properties];
+        if ($anon_distinct_id) {
+            $properties['$anon_distinct_id'] = $anon_distinct_id;
+        }
+
+        $this->send_to_posthog([
+            'api_key'     => $this->api_key,
+            'event'       => '$identify',
+            'distinct_id' => $email,
+            'properties'  => $properties,
+        ]);
+    }
+
+    /**
      * Enqueue Breakdance form tracker script on frontend
      */
     public function enqueue_breakdance_script() {
@@ -327,6 +388,28 @@ class DTP_PostHog_Tracker {
                         $field_properties[$normalized_key] = $value;
                     }
                 }
+            }
+
+            // Identify the visitor as a known person (if we found an email and
+            // they aren't already identified), and use the email as the
+            // distinct_id so this submission ties to their PostHog profile.
+            $email = $this->find_email_in_properties($field_properties);
+            if ($email) {
+                $anon_distinct_id = $this->get_posthog_anon_distinct_id();
+
+                if ($anon_distinct_id !== $email) {
+                    // Only pass $anon_distinct_id when it looks like a true anonymous
+                    // PostHog ID (not another person's email) — avoids merging two
+                    // different identified people if this browser previously
+                    // identified as someone else.
+                    $merge_from = ($anon_distinct_id && !filter_var($anon_distinct_id, FILTER_VALIDATE_EMAIL))
+                        ? $anon_distinct_id
+                        : null;
+
+                    $this->send_identify_event($email, $field_properties, $merge_from);
+                }
+
+                $distinct_id = $email;
             }
 
             // Get client-side properties (browser, device, UTM, etc.)

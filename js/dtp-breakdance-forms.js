@@ -97,6 +97,66 @@
         return match ? decodeURIComponent(match[1]) : null;
     }
 
+    /**
+     * Find the first form field value that looks like an email address.
+     */
+    var EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    function findEmail(properties) {
+        for (var key in properties) {
+            if (Object.prototype.hasOwnProperty.call(properties, key)) {
+                var val = properties[key];
+                if (typeof val === 'string' && EMAIL_REGEX.test(val.trim())) {
+                    return val.trim();
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Build the $set person properties for posthog.identify() from form
+     * fields that look like name/phone info, plus the detected email.
+     */
+    function buildIdentifyProperties(properties, email) {
+        var setProps = { email: email };
+        var NAME_OR_PHONE = /name|phone|mobile|tel/i;
+
+        Object.keys(properties).forEach(function (key) {
+            if (NAME_OR_PHONE.test(key) && properties[key] != null) {
+                setProps[key] = properties[key];
+            }
+        });
+
+        return setProps;
+    }
+
+    /**
+     * If the submitted form contains an email and this visitor isn't
+     * already identified, link their anonymous PostHog profile to this
+     * person so prior pageviews/UTMs/correlation_id history merges in.
+     */
+    function maybeIdentifyPerson(properties) {
+        try {
+            if (!window.posthog || typeof window.posthog.identify !== 'function') return;
+
+            var email = findEmail(properties);
+            if (!email) return;
+
+            var currentId = (typeof window.posthog.get_distinct_id === 'function') ? window.posthog.get_distinct_id() : null;
+
+            if (currentId === email) {
+                log('Person already identified as', currentId, '- skipping identify.');
+                return;
+            }
+
+            log('Identifying person via PostHog:', email);
+            window.posthog.identify(email, buildIdentifyProperties(properties, email));
+        } catch (e) {
+            console.log('[DTP PostHog Breakdance] maybeIdentifyPerson failed:', e);
+        }
+    }
+
     // Deduplication: track recently fired event signatures to prevent double-capture
     // when both XHR and fetch interceptors detect the same form submission.
     var _recentlyCaptured = {};
@@ -181,6 +241,10 @@
         if (correlationId) {
             properties['correlation_id'] = correlationId;
         }
+
+        // Identify the visitor as a known person (if we found an email and
+        // they aren't already identified) before reading the distinct_id below.
+        maybeIdentifyPerson(properties);
 
         // Try to get posthog distinct_id for continuity with other posthog events.
         var distinctId = (window.posthog && typeof window.posthog.get_distinct_id === 'function')

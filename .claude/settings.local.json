@@ -10,7 +10,12 @@
       "WebFetch(domain:breakdance4fun.supadezign.com)",
       "WebFetch(domain:conversionbridgewp.com)",
       "WebFetch(domain:wsform.com)",
-      "WebFetch(domain:plugins.svn.wordpress.org)"
+      "WebFetch(domain:plugins.svn.wordpress.org)",
+      "Bash(php *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(node --check js/dtp-breakdance-forms.js)"
     ]
   }
 }
