@@ -6,7 +6,7 @@
     var DEBUG = config.debug || false;
     function log() {
         if (DEBUG) {
-            console.log.apply(console, ['[DTP PostHog Breakdance]'].concat(Array.prototype.slice.call(arguments)));
+            console.log.apply(console, ['[DataTools Pro PostHog Breakdance]'].concat(Array.prototype.slice.call(arguments)));
         }
     }
 
@@ -57,10 +57,10 @@
                 });
             }
         } catch (e) {
-            log('[DTP PostHog] Could not parse request body:', e);
+            log('[DataTools Pro PostHog] Could not parse request body:', e);
         }
 
-        log('[DTP PostHog] Parsed form fields:', JSON.stringify(fields));
+        log('[DataTools Pro PostHog] Parsed form fields:', JSON.stringify(fields));
         return fields;
     }
 
@@ -151,7 +151,7 @@
             log('Identifying person via PostHog:', email);
             window.posthog.identify(email, buildIdentifyProperties(properties, email));
         } catch (e) {
-            log('[DTP PostHog Breakdance] maybeIdentifyPerson failed:', e);
+            log('[DataTools Pro PostHog Breakdance] maybeIdentifyPerson failed:', e);
         }
     }
 
@@ -177,7 +177,7 @@
      */
     function captureEvent(formFields, responseData) {
         if (isDuplicate(formFields)) {
-            log('[DTP PostHog Breakdance] Duplicate event suppressed within dedup window.');
+            log('[DataTools Pro PostHog Breakdance] Duplicate event suppressed within dedup window.');
             return;
         }
         // Strip internal WordPress/AJAX params — not useful as PostHog properties.
@@ -215,7 +215,7 @@
             }
         });
 
-        log('[DTP PostHog] Properties to send:', JSON.stringify(properties));
+        log('[DataTools Pro PostHog] Properties to send:', JSON.stringify(properties));
 
         // Pull any form metadata the Breakdance AJAX response includes.
         if (responseData && typeof responseData === 'object') {

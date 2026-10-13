@@ -1,6 +1,6 @@
-=== DTP PostHog Tracker ===
+=== DataTools Pro PostHog Tracker ===
 Contributors: datatoolspro
-Tags: posthog, analytics, forms, ninja forms, breakdance
+Tags: posthog, analytics, forms, contact form 7, wpforms
 Requires at least: 5.8
 Tested up to: 6.8
 Requires PHP: 7.4
@@ -8,13 +8,13 @@ Stable tag: 1.1.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Send Ninja Forms and Breakdance form submissions to PostHog as events, with all field values and automatic person identification.
+Send Contact Form 7, WPForms, Gravity Forms, Ninja Forms and Breakdance form submissions to PostHog as events, with all field values and automatic person identification.
 
 == Description ==
 
-DTP PostHog Tracker captures form submissions on your WordPress site and sends them to your PostHog project as events.
+DataTools Pro PostHog Tracker captures form submissions on your WordPress site and sends them to your PostHog project as events.
 
-* Supports Ninja Forms (server-side) and Breakdance forms (client-side, fired after a confirmed successful submission).
+* Supports Contact Form 7, WPForms, Gravity Forms and Ninja Forms (server-side, after a successful submission) and Breakdance forms (client-side, after a confirmed success).
 * Sends every form field as an event property, plus form ID, form title and site info.
 * Identifies visitors in PostHog by email address and merges their anonymous browsing history into their person profile.
 * Works with PostHog Cloud (US/EU) or a self-hosted reverse proxy.
@@ -40,9 +40,9 @@ You are responsible for informing your visitors and obtaining any consent requir
 
 == Frequently Asked Questions ==
 
-= Does it need Ninja Forms? =
+= Does it need a specific form plugin? =
 
-No. Ninja Forms submissions are tracked when Ninja Forms is active. Breakdance form tracking works independently.
+No. Each supported form plugin (Contact Form 7, WPForms, Gravity Forms, Ninja Forms, Breakdance) is tracked only if it is installed and active, and they work independently.
 
 = Can I use a reverse proxy? =
 
@@ -55,6 +55,7 @@ Yes. Enter your proxy's capture URL as the PostHog URL and set the PostHog UI Ho
 == Changelog ==
 
 = 1.1.0 =
+* Added Contact Form 7, WPForms and Gravity Forms support.
 * Settings page for API key, URL, event name, UI host, defaults version and person profiles.
 * Email-based person identification.
 * PostHog snippet is now enqueued via the WordPress script API.

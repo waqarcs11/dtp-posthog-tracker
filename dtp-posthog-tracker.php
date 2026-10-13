@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: DTP PostHog Tracker
+ * Plugin Name: DataTools Pro PostHog Tracker
  * Plugin URI: https://datatoolspro.com/
- * Description: Sends Ninja Forms and Breakdance form submissions to PostHog with all field properties, form details, and site info.
+ * Description: Sends Contact Form 7, WPForms, Gravity Forms, Ninja Forms and Breakdance form submissions to PostHog with all field properties, form details, and site info.
  * Version: 1.1.0
  * Requires at least: 5.8
  * Requires PHP: 7.4
@@ -10,7 +10,7 @@
  * Author URI: https://datatoolspro.com/
  * License: GPL-2.0-or-later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
- * Text Domain: dtp-posthog-tracker
+ * Text Domain: datatools-pro-posthog-tracker
  */
 
 if (!defined('ABSPATH')) {
@@ -74,11 +74,11 @@ class DTP_PostHog_Tracker {
     }
 
     public function init() {
-        if (class_exists('Ninja_Forms')) {
-            add_action('ninja_forms_after_submission', [$this, 'send_form_to_posthog']);
-        } else {
-            $this->log('DTP PostHog Tracker: Ninja Forms not active, skipping tracking.');
-        }
+        // Each hook only fires if the corresponding form plugin is active.
+        add_action('ninja_forms_after_submission', [$this, 'send_form_to_posthog']);
+        add_action('wpcf7_mail_sent', [$this, 'handle_cf7_submission']);
+        add_action('wpforms_process_complete', [$this, 'handle_wpforms_submission'], 10, 4);
+        add_action('gform_after_submission', [$this, 'handle_gravity_submission'], 10, 2);
     }
 
     /**
@@ -243,7 +243,7 @@ class DTP_PostHog_Tracker {
      */
     public function add_settings_page() {
         add_options_page(
-            'PostHog Tracker Settings',      // Page title
+            'DataTools Pro PostHog Tracker Settings', // Page title
             'PostHog Tracker',                // Menu title
             'manage_options',                  // Capability
             'dtp-posthog-settings',           // Menu slug
@@ -473,7 +473,7 @@ class DTP_PostHog_Tracker {
             ?>
             <div class="notice notice-warning is-dismissible">
                 <p>
-                    <strong>PostHog Tracker:</strong> Please configure your PostHog API Key and URL to start tracking form submissions.
+                    <strong>DataTools Pro PostHog Tracker:</strong> Please configure your PostHog API Key and URL to start tracking form submissions.
                     <a href="<?php echo esc_url(admin_url('options-general.php?page=dtp-posthog-settings')); ?>">Configure Settings</a>
                 </p>
             </div>
@@ -481,36 +481,155 @@ class DTP_PostHog_Tracker {
         }
     }
 
+    /**
+     * Ninja Forms handler.
+     */
     public function send_form_to_posthog($form_data) {
+        $fields = [];
+        if (!empty($form_data['fields']) && is_array($form_data['fields'])) {
+            foreach ($form_data['fields'] as $field) {
+                $fields[] = [
+                    'key'   => $field['key'] ?? ($field['label'] ?? ''),
+                    'value' => $field['value'] ?? null,
+                ];
+            }
+        }
+
+        $this->track_submission(
+            $form_data['form_id'] ?? null,
+            $form_data['settings']['title'] ?? 'Unknown Form',
+            $form_data['actions']['save']['sub_id'] ?? uniqid(),
+            $fields
+        );
+    }
+
+    /**
+     * Contact Form 7 handler (fires after the mail was sent successfully).
+     */
+    public function handle_cf7_submission($contact_form) {
+        if (!class_exists('WPCF7_Submission')) {
+            return;
+        }
+        $submission = WPCF7_Submission::get_instance();
+        if (!$submission) {
+            return;
+        }
+
+        $fields = [];
+        foreach ((array) $submission->get_posted_data() as $key => $value) {
+            if (strpos($key, '_') === 0) {
+                continue; // internal CF7 fields (_wpcf7, _wpcf7_unit_tag, ...)
+            }
+            $fields[] = ['key' => $key, 'value' => $value];
+        }
+
+        $this->track_submission(
+            $contact_form->id(),
+            $contact_form->title(),
+            uniqid(),
+            $fields
+        );
+    }
+
+    /**
+     * WPForms handler.
+     */
+    public function handle_wpforms_submission($wpforms_fields, $entry, $form_data, $entry_id) {
+        $skip_types = ['pagebreak', 'divider', 'html', 'content', 'captcha', 'hidden-honeypot'];
+
+        $fields = [];
+        foreach ((array) $wpforms_fields as $field) {
+            if (in_array($field['type'] ?? '', $skip_types, true)) {
+                continue;
+            }
+            $fields[] = [
+                'key'   => $field['name'] ?? '',
+                'value' => $field['value'] ?? null,
+            ];
+        }
+
+        $this->track_submission(
+            $form_data['id'] ?? null,
+            $form_data['settings']['form_title'] ?? 'Unknown Form',
+            $entry_id ? $entry_id : uniqid(),
+            $fields
+        );
+    }
+
+    /**
+     * Gravity Forms handler.
+     */
+    public function handle_gravity_submission($entry, $form) {
+        $skip_types = ['page', 'section', 'html', 'captcha'];
+
+        $fields = [];
+        foreach ((array) ($form['fields'] ?? []) as $field) {
+            if (in_array($field->type, $skip_types, true)) {
+                continue;
+            }
+
+            if (is_array($field->inputs) && !empty($field->inputs)) {
+                // Multi-input fields (name, address, checkboxes): join the parts.
+                $parts = [];
+                foreach ($field->inputs as $input) {
+                    $part = $entry[(string) $input['id']] ?? '';
+                    if ($part !== '' && $part !== null) {
+                        $parts[] = $part;
+                    }
+                }
+                $value = implode(', ', $parts);
+            } else {
+                $value = $entry[(string) $field->id] ?? '';
+            }
+
+            $fields[] = ['key' => $field->label, 'value' => $value];
+        }
+
+        $this->track_submission(
+            $form['id'] ?? null,
+            $form['title'] ?? 'Unknown Form',
+            $entry['id'] ?? uniqid(),
+            $fields
+        );
+    }
+
+    /**
+     * Shared pipeline: normalise fields, identify the visitor by email, and
+     * send the form event to PostHog.
+     *
+     * @param mixed  $form_id
+     * @param string $form_title
+     * @param mixed  $submission_id
+     * @param array  $fields List of ['key' => string, 'value' => mixed].
+     */
+    private function track_submission($form_id, $form_title, $submission_id, $fields) {
         try {
-            $this->log('DTP PostHog Tracker: Submission triggered.');
+            $this->log('DataTools Pro PostHog Tracker: Submission triggered.');
 
-            // Extract form details
-            $form_id       = $form_data['form_id'] ?? null;
-            $form_title    = $form_data['settings']['title'] ?? 'Unknown Form';
-            $submission_id = $form_data['actions']['save']['sub_id'] ?? uniqid();
-            $site_id       = isset($_SERVER['SERVER_NAME']) ? sanitize_text_field(wp_unslash($_SERVER['SERVER_NAME'])) : 'Unknown Site';
-            $distinct_id   = is_user_logged_in() ? get_current_user_id() : 'submission_' . $submission_id;
+            $site_id     = isset($_SERVER['SERVER_NAME']) ? sanitize_text_field(wp_unslash($_SERVER['SERVER_NAME'])) : 'Unknown Site';
+            $distinct_id = is_user_logged_in() ? get_current_user_id() : 'submission_' . $submission_id;
 
-            // Extract all field values
             $field_properties = [];
-            if (!empty($form_data['fields']) && is_array($form_data['fields'])) {
-                foreach ($form_data['fields'] as $field) {
-                    $key   = $field['key'] ?? $field['label'];
-                    $value = $field['value'] ?? null;
+            foreach ($fields as $field) {
+                $key   = $field['key'] ?? '';
+                $value = $field['value'] ?? null;
 
-                    if ($key && $value !== null) {
-                        // Clean up field name
-                        $normalized_key = preg_replace('/_\d+$/', '', $key); // remove numeric suffixes
-                        $normalized_key = preg_replace('/\s+/', '_', strtolower($normalized_key));
-                        $normalized_key = preg_replace('/[^a-z0-9_]/', '', $normalized_key);
+                if (is_array($value)) {
+                    $value = implode(', ', array_map('strval', array_filter($value, 'is_scalar')));
+                }
+
+                if ($key && $value !== null) {
+                    $normalized_key = preg_replace('/_\d+$/', '', $key); // remove numeric suffixes
+                    $normalized_key = preg_replace('/\s+/', '_', strtolower($normalized_key));
+                    $normalized_key = preg_replace('/[^a-z0-9_]/', '', $normalized_key);
+                    if ($normalized_key !== '') {
                         $field_properties[$normalized_key] = $value;
                     }
                 }
             }
 
             // Identify the visitor as a known person (if we found an email and
-            // they aren't already identified), and use the email as the
+            // they are not already identified), and use the email as the
             // distinct_id so this submission ties to their PostHog profile.
             $email = $this->find_email_in_properties($field_properties);
             if ($email) {
@@ -518,7 +637,7 @@ class DTP_PostHog_Tracker {
 
                 if ($anon_distinct_id !== $email) {
                     // Only pass $anon_distinct_id when it looks like a true anonymous
-                    // PostHog ID (not another person's email) — avoids merging two
+                    // PostHog ID (not another person's email) - avoids merging two
                     // different identified people if this browser previously
                     // identified as someone else.
                     $merge_from = ($anon_distinct_id && !filter_var($anon_distinct_id, FILTER_VALIDATE_EMAIL))
@@ -542,29 +661,26 @@ class DTP_PostHog_Tracker {
                 'SiteId'           => $site_id,
             ], $field_properties);
 
-            // Build payload
-            $payload = [
+            $this->send_to_posthog([
                 'api_key'     => $this->api_key,
                 'distinct_id' => $distinct_id,
                 'event'       => !empty($this->event_name) ? $this->event_name : 'Form Submitted',
                 'properties'  => $properties,
-            ];
-
-            $this->send_to_posthog($payload);
+            ]);
 
         } catch (Exception $e) {
-            $this->log('DTP PostHog Tracker Exception: ' . $e->getMessage());
+            $this->log('DataTools Pro PostHog Tracker Exception: ' . $e->getMessage());
         }
     }
 
     private function send_to_posthog($payload) {
         if (empty($this->api_key)) {
-            $this->log('DTP PostHog Tracker: Missing API Key. Please configure in Settings > PostHog Tracker.');
+            $this->log('DataTools Pro PostHog Tracker: Missing API Key. Please configure in Settings > PostHog Tracker.');
             return;
         }
 
         if (empty($this->posthog_url)) {
-            $this->log('DTP PostHog Tracker: Missing PostHog URL. Please configure in Settings > PostHog Tracker.');
+            $this->log('DataTools Pro PostHog Tracker: Missing PostHog URL. Please configure in Settings > PostHog Tracker.');
             return;
         }
 
@@ -575,9 +691,9 @@ class DTP_PostHog_Tracker {
         ]);
 
         if (is_wp_error($response)) {
-            $this->log('DTP PostHog Tracker Error: ' . $response->get_error_message());
+            $this->log('DataTools Pro PostHog Tracker Error: ' . $response->get_error_message());
         } else {
-            $this->log('DTP PostHog Tracker Response: ' . wp_remote_retrieve_body($response));
+            $this->log('DataTools Pro PostHog Tracker Response: ' . wp_remote_retrieve_body($response));
         }
     }
 }
