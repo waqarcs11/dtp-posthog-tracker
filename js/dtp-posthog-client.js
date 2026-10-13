@@ -31,7 +31,7 @@
     function onSubmitClick() {
         var correlationId = getCorrelationId();
         if (window.posthog && typeof window.posthog.capture === 'function') {
-            window.posthog.capture('fundcanna_form_submit_attempt', {
+            window.posthog.capture('dtp_form_submit_attempt', {
                 correlation_id: correlationId
             }, { transport: 'sendBeacon' });
         }
