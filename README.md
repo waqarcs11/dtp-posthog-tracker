@@ -1,9 +1,9 @@
-# DTP PostHog Tracker — Full Plugin Documentation
+# DataTools Pro PostHog Tracker — Full Plugin Documentation
 
-**Plugin Name:** DTP PostHog Tracker  
-**Version:** 1.0.0  
+**Plugin Name:** DataTools Pro PostHog Tracker  
+**Version:** 1.1.0  
 **Author:** DataTools Pro  
-**WordPress Hook Compatibility:** Breakdance Form Builder, Ninja Forms  
+**WordPress Hook Compatibility:** Breakdance Form Builder, Ninja Forms, Contact Form 7, WPForms, Gravity Forms  
 
 ---
 
@@ -32,7 +32,7 @@
 
 ## 1. What Is This Plugin?
 
-DTP PostHog Tracker is a custom WordPress plugin that **captures Breakdance form submissions and sends them as events to PostHog** (a product analytics platform). Those events are then forwarded from PostHog to **Salesforce** via a PostHog Data Pipeline, creating or updating Salesforce records automatically whenever a user submits a form on the website.
+DataTools Pro PostHog Tracker is a custom WordPress plugin that **captures Breakdance form submissions and sends them as events to PostHog** (a product analytics platform). Those events are then forwarded from PostHog to **Salesforce** via a PostHog Data Pipeline, creating or updating Salesforce records automatically whenever a user submits a form on the website.
 
 In plain terms:
 
@@ -462,9 +462,9 @@ Open DevTools → Console when submitting a form. You will see:
 
 | Log Message | Meaning |
 |---|---|
-| `🚀 DTP PostHog Tracker: Submission triggered.` | Ninja Forms submission received (not Breakdance) |
-| `✅ DTP PostHog Tracker Response: ...` | Server-side PostHog call succeeded |
-| `❌ DTP PostHog Tracker Error: ...` | Server-side PostHog call failed |
+| `🚀 DataTools Pro PostHog Tracker: Submission triggered.` | Ninja Forms submission received (not Breakdance) |
+| `✅ DataTools Pro PostHog Tracker Response: ...` | Server-side PostHog call succeeded |
+| `❌ DataTools Pro PostHog Tracker Error: ...` | Server-side PostHog call failed |
 | `⚠️ Missing API Key / URL` | Plugin not configured |
 
 **Enabling Debug Mode**

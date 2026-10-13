@@ -94,7 +94,7 @@ See [README.md § 14 — PostHog Person Identification](README.md#14-posthog-per
 2. Fill in the form, including the **email field**, and submit.
 3. Check the **PHP error log** (location depends on your WordPress/server setup, often `wp-content/debug.log` if `WP_DEBUG_LOG` is enabled) for:
    ```
-   ✅ DTP PostHog Tracker Response: ...
+   DataTools Pro PostHog Tracker Response: ...
    ```
    This confirms the server-side request(s) to PostHog succeeded. There should be a successful response logged for both the `$identify` event and the main form event.
 
