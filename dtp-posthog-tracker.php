@@ -1,7 +1,6 @@
 <?php
 /**
  * Plugin Name: DataTools Pro PostHog Tracker
- * Plugin URI: https://datatoolspro.com/
  * Description: Sends Contact Form 7, WPForms, Gravity Forms, Ninja Forms and Breakdance form submissions to PostHog with all field properties, form details, and site info.
  * Version: 1.1.0
  * Requires at least: 5.8
