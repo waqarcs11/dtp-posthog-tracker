@@ -452,8 +452,8 @@ Open DevTools → Console when submitting a form. You will see:
 | `EVENT_NAME== Form Submitted` | Script loaded, event name confirmed |
 | `admin-ajax.php action detected: breakdance_form_submit` | A Breakdance AJAX request was intercepted |
 | `Breakdance form XHR detected` or `fetch() detected` | Confirmed as a Breakdance form request |
-| `[DTP PostHog] Parsed form fields: {...}` | Shows all fields extracted from the form body |
-| `[DTP PostHog] Properties to send: {...}` | Shows the final payload before sending |
+| `[DataTools Pro PostHog] Parsed form fields: {...}` | Shows all fields extracted from the form body |
+| `[DataTools Pro PostHog] Properties to send: {...}` | Shows the final payload before sending |
 | `Capturing event "Form Submitted"` | Event is about to fire |
 | `sendBeacon dispatched: true` | Event sent successfully via sendBeacon |
 | `Duplicate event suppressed` | Deduplication guard blocked a second fire |
