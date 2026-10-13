@@ -1,26 +1,43 @@
 <?php
 /**
  * Plugin Name: DTP PostHog Tracker
- * Description: Sends Ninja Forms submissions to PostHog with all field properties, form details, and site info.
- * Version: 1.0.0
+ * Plugin URI: https://datatoolspro.com/
+ * Description: Sends Ninja Forms and Breakdance form submissions to PostHog with all field properties, form details, and site info.
+ * Version: 1.1.0
+ * Requires at least: 5.8
+ * Requires PHP: 7.4
  * Author: DataTools Pro
+ * Author URI: https://datatoolspro.com/
+ * License: GPL-2.0-or-later
+ * License URI: https://www.gnu.org/licenses/gpl-2.0.html
+ * Text Domain: dtp-posthog-tracker
  */
 
 if (!defined('ABSPATH')) {
     exit; // Prevent direct access
 }
 
+define('DTP_POSTHOG_TRACKER_VERSION', '1.1.0');
+
 class DTP_PostHog_Tracker {
 
     private $api_key;
     private $posthog_url;
     private $event_name;
+    private $ui_host;
+    private $defaults;
+    private $person_profiles;
 
     public function __construct() {
         // Get settings from options (no defaults - customer must configure)
         $this->api_key = get_option('dtp_posthog_api_key', '');
         $this->posthog_url = get_option('dtp_posthog_url', '');
-        $this->event_name = get_option('dtp_posthog_event_name', 'Fundacann Form Submitted');
+        $this->event_name = get_option('dtp_posthog_event_name', 'Form Submitted');
+
+        // Browser-side init() options 
+        $this->ui_host         = get_option('dtp_posthog_ui_host', '');
+        $this->defaults        = get_option('dtp_posthog_defaults', '');
+        $this->person_profiles = get_option('dtp_posthog_person_profiles', 'identified_only');
 
         // Add admin menu
         add_action('admin_menu', [$this, 'add_settings_page']);
@@ -35,7 +52,7 @@ class DTP_PostHog_Tracker {
         add_action('admin_notices', [$this, 'admin_notice_missing_settings']);
 
         // Inject PostHog JS snippet into <head>
-        add_action('wp_head', [$this, 'inject_posthog_snippet']);
+        add_action('wp_enqueue_scripts', [$this, 'inject_posthog_snippet']);
 
         // Enqueue client-side property collector
         add_action('wp_enqueue_scripts', [$this, 'enqueue_client_script']);
@@ -47,16 +64,25 @@ class DTP_PostHog_Tracker {
         add_action('plugins_loaded', [$this, 'init']);
     }
 
+    /**
+     * Debug logging, only active when WP_DEBUG_LOG is enabled.
+     */
+    private function log($message) {
+        if (defined('WP_DEBUG') && WP_DEBUG && defined('WP_DEBUG_LOG') && WP_DEBUG_LOG) {
+            error_log($message); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+        }
+    }
+
     public function init() {
         if (class_exists('Ninja_Forms')) {
             add_action('ninja_forms_after_submission', [$this, 'send_form_to_posthog']);
         } else {
-            error_log('⚠️ DTP PostHog Tracker: Ninja Forms not active, skipping tracking.');
+            $this->log('DTP PostHog Tracker: Ninja Forms not active, skipping tracking.');
         }
     }
 
     /**
-     * Inject PostHog JS snippet into <head> on frontend
+     * Enqueue the PostHog JS loader snippet and init call on the frontend
      */
     public function inject_posthog_snippet() {
         if (empty($this->api_key) || empty($this->posthog_url)) {
@@ -64,16 +90,35 @@ class DTP_PostHog_Tracker {
         }
 
         // Derive base host from the stored capture URL (e.g. https://app.posthog.com/capture/ → https://app.posthog.com)
-        $parsed   = parse_url($this->posthog_url);
+        $parsed   = wp_parse_url($this->posthog_url);
         $api_host = $parsed['scheme'] . '://' . $parsed['host'];
-        ?>
-        <script>
-            if (!window.posthog || !window.posthog.__loaded) {
-                !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.async=!0,p.src=s.api_host+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+" (stub)"},o="capture identify alias people.set people.set_once set_config register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled onFeatureFlags getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures getActiveMatchingSurveys getSurveys onSessionId".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||(window.posthog=[]));
-                posthog.init('<?php echo esc_js($this->api_key); ?>', {api_host: '<?php echo esc_js($api_host); ?>'});
-            }
-        </script>
-        <?php
+
+        // Build the init() options object. api_host is the saved PostHog URL's
+        // host (or your reverse proxy); the rest are configurable
+        // under Settings > PostHog Tracker. Empty values are omitted so PostHog
+        // falls back to its own defaults.
+        $init_options = ['api_host' => $api_host];
+        if (!empty($this->ui_host)) {
+            $init_options['ui_host'] = $this->ui_host;
+        }
+        if (!empty($this->defaults)) {
+            $init_options['defaults'] = $this->defaults;
+        }
+        if (!empty($this->person_profiles)) {
+            $init_options['person_profiles'] = $this->person_profiles;
+        }
+
+        wp_enqueue_script(
+            'dtp-posthog-snippet',
+            plugin_dir_url(__FILE__) . 'js/dtp-posthog-snippet.js',
+            [],
+            DTP_POSTHOG_TRACKER_VERSION,
+            false
+        );
+        wp_add_inline_script(
+            'dtp-posthog-snippet',
+            'posthog.init(' . wp_json_encode($this->api_key) . ', ' . wp_json_encode($init_options) . ');'
+        );
     }
 
     /**
@@ -180,13 +225,13 @@ class DTP_PostHog_Tracker {
             true
         );
 
-        $parsed   = parse_url($this->posthog_url);
+        $parsed   = wp_parse_url($this->posthog_url);
         $api_host = (!empty($parsed['scheme']) && !empty($parsed['host']))
             ? $parsed['scheme'] . '://' . $parsed['host']
             : '';
 
         wp_localize_script('dtp-breakdance-forms', 'dtpBreakdanceConfig', [
-            'eventName' => !empty($this->event_name) ? $this->event_name : 'Fundacann Form Submitted',
+            'eventName' => !empty($this->event_name) ? $this->event_name : 'Form Submitted',
             'debug'     => (defined('WP_DEBUG') && WP_DEBUG) ? true : false,
             'apiKey'    => $this->api_key,
             'apiHost'   => $api_host,
@@ -225,7 +270,25 @@ class DTP_PostHog_Tracker {
         register_setting('dtp_posthog_settings_group', 'dtp_posthog_event_name', [
             'type' => 'string',
             'sanitize_callback' => 'sanitize_text_field',
-            'default' => 'Fundacann Form Submitted'
+            'default' => 'Form Submitted'
+        ]);
+
+        register_setting('dtp_posthog_settings_group', 'dtp_posthog_ui_host', [
+            'type' => 'string',
+            'sanitize_callback' => 'esc_url_raw',
+            'default' => ''
+        ]);
+
+        register_setting('dtp_posthog_settings_group', 'dtp_posthog_defaults', [
+            'type' => 'string',
+            'sanitize_callback' => 'sanitize_text_field',
+            'default' => ''
+        ]);
+
+        register_setting('dtp_posthog_settings_group', 'dtp_posthog_person_profiles', [
+            'type' => 'string',
+            'sanitize_callback' => 'sanitize_text_field',
+            'default' => 'identified_only'
         ]);
 
         add_settings_section(
@@ -258,6 +321,30 @@ class DTP_PostHog_Tracker {
             'dtp-posthog-settings',
             'dtp_posthog_main_section'
         );
+
+        add_settings_field(
+            'dtp_posthog_ui_host',
+            'PostHog UI Host',
+            [$this, 'ui_host_field_callback'],
+            'dtp-posthog-settings',
+            'dtp_posthog_main_section'
+        );
+
+        add_settings_field(
+            'dtp_posthog_defaults',
+            'Config Defaults Version',
+            [$this, 'defaults_field_callback'],
+            'dtp-posthog-settings',
+            'dtp_posthog_main_section'
+        );
+
+        add_settings_field(
+            'dtp_posthog_person_profiles',
+            'Person Profiles',
+            [$this, 'person_profiles_field_callback'],
+            'dtp-posthog-settings',
+            'dtp_posthog_main_section'
+        );
     }
 
     /**
@@ -281,17 +368,49 @@ class DTP_PostHog_Tracker {
      */
     public function url_field_callback() {
         $url = get_option('dtp_posthog_url', '');
-        echo '<input type="url" name="dtp_posthog_url" value="' . esc_attr($url) . '" class="regular-text" placeholder="https://app.posthog.com/capture/" required />';
-        echo '<p class="description">Enter your PostHog capture URL (e.g., https://app.posthog.com/capture/)</p>';
+        echo '<input type="url" name="dtp_posthog_url" value="' . esc_attr($url) . '" class="regular-text" placeholder="https://analytics.example.com" required />';
+        echo '<p class="description">Your PostHog capture URL. The browser <code>api_host</code> is derived from this URL\'s host, so point it at your reverse proxy when using one (e.g. https://analytics.example.com/capture/). Without a proxy, use https://app.posthog.com/capture/.</p>';
     }
 
     /**
      * Event Name field callback
      */
     public function event_name_field_callback() {
-        $event_name = get_option('dtp_posthog_event_name', 'Fundacann Form Submitted');
-        echo '<input type="text" name="dtp_posthog_event_name" value="' . esc_attr($event_name) . '" class="regular-text" placeholder="Fundacann Form Submitted" />';
-        echo '<p class="description">Enter the event name to send to PostHog (default: "Fundacann Form Submitted")</p>';
+        $event_name = get_option('dtp_posthog_event_name', 'Form Submitted');
+        echo '<input type="text" name="dtp_posthog_event_name" value="' . esc_attr($event_name) . '" class="regular-text" placeholder="Form Submitted" />';
+        echo '<p class="description">Enter the event name to send to PostHog (default: "Form Submitted")</p>';
+    }
+
+    /**
+     * UI Host field callback
+     */
+    public function ui_host_field_callback() {
+        $ui_host = get_option('dtp_posthog_ui_host', '');
+        echo '<input type="url" name="dtp_posthog_ui_host" value="' . esc_attr($ui_host) . '" class="regular-text" placeholder="https://us.posthog.com" />';
+        echo '<p class="description">Only needed when the PostHog URL above is a reverse proxy (e.g. https://analytics.example.com). Set this to your real PostHog host so dashboard links resolve correctly &mdash; US: https://us.posthog.com, EU: https://eu.posthog.com. Leave blank if not using a proxy.</p>';
+    }
+
+    /**
+     * Config "defaults" version field callback
+     */
+    public function defaults_field_callback() {
+        $defaults = get_option('dtp_posthog_defaults', '');
+        echo '<input type="text" name="dtp_posthog_defaults" value="' . esc_attr($defaults) . '" class="regular-text" placeholder="2026-05-30" />';
+        echo '<p class="description">PostHog config "defaults" version, e.g. 2026-05-30. Pins default behavior to a dated baseline. Leave blank to omit the option.</p>';
+    }
+
+    /**
+     * Person Profiles field callback
+     */
+    public function person_profiles_field_callback() {
+        $person_profiles = get_option('dtp_posthog_person_profiles', 'identified_only');
+        ?>
+        <select name="dtp_posthog_person_profiles">
+            <option value="identified_only" <?php selected($person_profiles, 'identified_only'); ?>>identified_only</option>
+            <option value="always" <?php selected($person_profiles, 'always'); ?>>always</option>
+        </select>
+        <p class="description">"identified_only" creates person profiles only for identified users (recommended). "always" also profiles anonymous visitors.</p>
+        <?php
     }
 
     /**
@@ -364,13 +483,13 @@ class DTP_PostHog_Tracker {
 
     public function send_form_to_posthog($form_data) {
         try {
-            error_log('🚀 DTP PostHog Tracker: Submission triggered.');
+            $this->log('DTP PostHog Tracker: Submission triggered.');
 
             // Extract form details
             $form_id       = $form_data['form_id'] ?? null;
             $form_title    = $form_data['settings']['title'] ?? 'Unknown Form';
             $submission_id = $form_data['actions']['save']['sub_id'] ?? uniqid();
-            $site_id       = $_SERVER['SERVER_NAME'] ?? 'Unknown Site';
+            $site_id       = isset($_SERVER['SERVER_NAME']) ? sanitize_text_field(wp_unslash($_SERVER['SERVER_NAME'])) : 'Unknown Site';
             $distinct_id   = is_user_logged_in() ? get_current_user_id() : 'submission_' . $submission_id;
 
             // Extract all field values
@@ -427,25 +546,25 @@ class DTP_PostHog_Tracker {
             $payload = [
                 'api_key'     => $this->api_key,
                 'distinct_id' => $distinct_id,
-                'event'       => !empty($this->event_name) ? $this->event_name : 'Fundacann Form Submitted',
+                'event'       => !empty($this->event_name) ? $this->event_name : 'Form Submitted',
                 'properties'  => $properties,
             ];
 
             $this->send_to_posthog($payload);
 
         } catch (Exception $e) {
-            error_log('❌ DTP PostHog Tracker Exception: ' . $e->getMessage());
+            $this->log('DTP PostHog Tracker Exception: ' . $e->getMessage());
         }
     }
 
     private function send_to_posthog($payload) {
         if (empty($this->api_key)) {
-            error_log('⚠️ DTP PostHog Tracker: Missing API Key. Please configure in Settings > PostHog Tracker.');
+            $this->log('DTP PostHog Tracker: Missing API Key. Please configure in Settings > PostHog Tracker.');
             return;
         }
 
         if (empty($this->posthog_url)) {
-            error_log('⚠️ DTP PostHog Tracker: Missing PostHog URL. Please configure in Settings > PostHog Tracker.');
+            $this->log('DTP PostHog Tracker: Missing PostHog URL. Please configure in Settings > PostHog Tracker.');
             return;
         }
 
@@ -456,9 +575,9 @@ class DTP_PostHog_Tracker {
         ]);
 
         if (is_wp_error($response)) {
-            error_log('❌ DTP PostHog Tracker Error: ' . $response->get_error_message());
+            $this->log('DTP PostHog Tracker Error: ' . $response->get_error_message());
         } else {
-            error_log('✅ DTP PostHog Tracker Response: ' . wp_remote_retrieve_body($response));
+            $this->log('DTP PostHog Tracker Response: ' . wp_remote_retrieve_body($response));
         }
     }
 }

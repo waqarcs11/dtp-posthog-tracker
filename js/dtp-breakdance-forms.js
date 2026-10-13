@@ -2,9 +2,8 @@
     'use strict';
 
     var config = window.dtpBreakdanceConfig || {};
-    var EVENT_NAME = config.eventName || 'Fundacann Form Submitted';
+    var EVENT_NAME = config.eventName || 'Form Submitted';
     var DEBUG = config.debug || false;
-    console.log('EVENT_NAME==' + EVENT_NAME)
     function log() {
         if (DEBUG) {
             console.log.apply(console, ['[DTP PostHog Breakdance]'].concat(Array.prototype.slice.call(arguments)));
@@ -58,10 +57,10 @@
                 });
             }
         } catch (e) {
-            console.log('[DTP PostHog] Could not parse request body:', e);
+            log('[DTP PostHog] Could not parse request body:', e);
         }
 
-        console.log('[DTP PostHog] Parsed form fields:', JSON.stringify(fields));
+        log('[DTP PostHog] Parsed form fields:', JSON.stringify(fields));
         return fields;
     }
 
@@ -71,7 +70,7 @@
      */
     function isBreakdanceForm(fields) {
         var action = (fields['action'] || '').toLowerCase();
-        console.log('admin-ajax.php action detected:', action || '(none)');
+        log('admin-ajax.php action detected:', action || '(none)');
         log('admin-ajax.php action detected:', action || '(none)');
 
         // Breakdance is expected to use an action name containing "breakdance" and "form".
@@ -83,7 +82,6 @@
      * Check whether a parsed AJAX response signals a successful form submission.
      */
     function isSuccessResponse(response) {
-        console.log('check response');
         if (!response || typeof response !== 'object') return false;
 
         return response.type === 'success' || response.success === true || response.status === 'success';
@@ -153,7 +151,7 @@
             log('Identifying person via PostHog:', email);
             window.posthog.identify(email, buildIdentifyProperties(properties, email));
         } catch (e) {
-            console.log('[DTP PostHog Breakdance] maybeIdentifyPerson failed:', e);
+            log('[DTP PostHog Breakdance] maybeIdentifyPerson failed:', e);
         }
     }
 
@@ -179,7 +177,7 @@
      */
     function captureEvent(formFields, responseData) {
         if (isDuplicate(formFields)) {
-            console.log('[DTP PostHog Breakdance] Duplicate event suppressed within dedup window.');
+            log('[DTP PostHog Breakdance] Duplicate event suppressed within dedup window.');
             return;
         }
         // Strip internal WordPress/AJAX params — not useful as PostHog properties.
@@ -217,7 +215,7 @@
             }
         });
 
-        console.log('[DTP PostHog] Properties to send:', JSON.stringify(properties));
+        log('[DTP PostHog] Properties to send:', JSON.stringify(properties));
 
         // Pull any form metadata the Breakdance AJAX response includes.
         if (responseData && typeof responseData === 'object') {
@@ -251,7 +249,7 @@
             ? window.posthog.get_distinct_id()
             : 'bf_' + Date.now();
 
-        console.log('Capturing event "' + EVENT_NAME + '"', properties);
+        log('Capturing event "' + EVENT_NAME + '"', properties);
 
         var apiKey  = config.apiKey  || '';
         var apiHost = config.apiHost || 'https://app.posthog.com';
@@ -266,7 +264,7 @@
                 timestamp:   new Date().toISOString()
             });
             var sent = navigator.sendBeacon(apiHost + '/capture/', new Blob([payload], { type: 'application/json' }));
-            console.log('sendBeacon dispatched:', sent);
+            log('sendBeacon dispatched:', sent);
             return;
         }
 
@@ -274,7 +272,7 @@
         if (window.posthog && typeof window.posthog.capture === 'function') {
             window.posthog.capture(EVENT_NAME, properties);
         } else {
-            console.log('PostHog not available and sendBeacon not supported, skipping capture.');
+            log('PostHog not available and sendBeacon not supported, skipping capture.');
         }
     }
 
@@ -290,26 +288,26 @@
     };
 
     XMLHttpRequest.prototype.send = function (body) {
-        console.log('in send');
+        log('in send');
         var xhr = this;
 
         if (xhr._dtpUrl.indexOf('admin-ajax.php') !== -1) {
             var fields = parseBody(body);
 
             if (isBreakdanceForm(fields)) {
-                console.log('Breakdance form XHR detected, watching for success response.');
+                log('Breakdance form XHR detected, watching for success response.');
 
                 xhr.addEventListener('load', function () {
                     try {
                         var response = JSON.parse(xhr.responseText);
                         if (isSuccessResponse(response)) {
-                            console.log('Breakdance form success confirmed via XHR.');
+                            log('Breakdance form success confirmed via XHR.');
                             captureEvent(fields, response);
                         } else {
-                            console.log('Breakdance AJAX response was not a success:', response);
+                            log('Breakdance AJAX response was not a success:', response);
                         }
                     } catch (e) {
-                        console.log('Could not parse AJAX response as JSON:', e);
+                        log('Could not parse AJAX response as JSON:', e);
                     }
                 });
             }
@@ -322,7 +320,7 @@
     // Fetch interceptor (in case Breakdance uses fetch() instead of XHR)
     // -------------------------------------------------------------------------
     if (window.fetch) {
-        console.log('in fetch');
+        log('in fetch');
         var originalFetch = window.fetch;
 
         window.fetch = function (resource, options) {
@@ -334,19 +332,19 @@
                 var fields = parseBody(body);
 
                 if (isBreakdanceForm(fields)) {
-                    console.log('Breakdance form fetch() detected, watching for success response.');
+                    log('Breakdance form fetch() detected, watching for success response.');
 
                     return originalFetch.apply(this, arguments).then(function (response) {
                         // Clone so we don't consume the body for the caller.
                         response.clone().json().then(function (data) {
                             if (isSuccessResponse(data)) {
-                                console.log('Breakdance form success confirmed via fetch.');
+                                log('Breakdance form success confirmed via fetch.');
                                 captureEvent(fields, data);
                             } else {
-                                console.log('Breakdance fetch response was not a success:', data);
+                                log('Breakdance fetch response was not a success:', data);
                             }
                         }).catch(function (e) {
-                            console.log('Could not parse fetch response as JSON:', e);
+                            log('Could not parse fetch response as JSON:', e);
                         });
                         return response;
                     });
@@ -357,6 +355,6 @@
         };
     }
 
-    console.log('Breakdance form tracker initialized. Event name: "' + EVENT_NAME + '"');
+    log('Breakdance form tracker initialized. Event name: "' + EVENT_NAME + '"');
 
 })();
